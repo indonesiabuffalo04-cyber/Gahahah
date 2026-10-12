@@ -1,0 +1,286 @@
+-- Blox Fruits | Sea 1 Auto-Farm | Fluent UI (Dawid's FluentUI lib)
+-- Runtime: Synapse X / KRNL / Fluxus | Sea 1 only
+
+-- ── FLUENT LOAD ──────────────────────────────────────────────────────────────
+local Fluent = loadstring(game:HttpGet(
+    "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
+))()
+local SaveManager  = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"
+))()
+local InterfaceManager = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"
+))()
+
+-- ── SERVICES ─────────────────────────────────────────────────────────────────
+local Players    = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS        = game:GetService("UserInputService")
+local RS         = game:GetService("ReplicatedStorage")
+
+local lp   = Players.LocalPlayer
+local char = lp.Character or lp.CharacterAdded:Wait()
+local hrp, hum
+
+-- ── CONFIG ───────────────────────────────────────────────────────────────────
+local CFG = {
+    FarmEnabled  = false,
+    AutoQuest    = true,
+    AutoCollect  = true,
+    WalkSpeed    = 50,
+    JumpPower    = 80,
+    AttackRange  = 20,
+    Sea1MaxLevel = 700,
+    SafeHP       = 0.25,
+    LoopDelay    = 0.1,
+}
+
+-- ── SEA 1 DATA ────────────────────────────────────────────────────────────────
+local SEA1_QUESTS = {
+    "Military Side Quest","Pirate Village Quest","Middle Town Quest",
+    "Jungle Quest","Pirate Ship Quest","Desert Quest",
+    "Frozen Village Quest","Marine Fortress Quest","Skylands Quest",
+}
+local SEA1_ENEMIES = {
+    "bandit","pirate","marine","desert","yeti","sky bandit","snowman",
+    "gorilla","boss","cultist","toga","prisoner","alchemist","archer",
+    "gladiator","saber","fishman","darkbeard","wysper","thunder god",
+    "magma admiral",
+}
+
+-- ── HELPERS ───────────────────────────────────────────────────────────────────
+local function isSea1Enemy(name)
+    name = name:lower()
+    for _, f in ipairs(SEA1_ENEMIES) do
+        if name:find(f, 1, true) then return true end
+    end
+    return false
+end
+
+local function getChar()
+    char = lp.Character
+    if not char then return false end
+    hrp  = char:FindFirstChild("HumanoidRootPart")
+    hum  = char:FindFirstChild("Humanoid")
+    return hrp and hum
+end
+
+local function safeHP()
+    return getChar() and (hum.Health / hum.MaxHealth) > CFG.SafeHP
+end
+
+local function tpTo(pos)
+    if getChar() then hrp.CFrame = CFrame.new(pos) end
+end
+
+local function applyStats()
+    if not getChar() then return end
+    hum.WalkSpeed = CFG.WalkSpeed
+    hum.JumpPower = CFG.JumpPower
+end
+
+local function inSea1()
+    local stats = lp:FindFirstChild("leaderstats") or lp:FindFirstChild("Data")
+    if not stats then return true end
+    local lvl = stats:FindFirstChild("Level")
+    if lvl and lvl.Value > CFG.Sea1MaxLevel then
+        warn("[larp] level "..lvl.Value.." — past Sea 1 cap, halting")
+        return false
+    end
+    return true
+end
+
+local function nearestEnemy()
+    if not getChar() then return end
+    local best, bestDist = nil, math.huge
+    for _, m in ipairs(workspace:GetDescendants()) do
+        if m:IsA("Model") and m ~= char then
+            local h = m:FindFirstChild("Humanoid")
+            local r = m:FindFirstChildWhichIsA("BasePart")
+            if h and h.Health > 0 and r and isSea1Enemy(m.Name) then
+                local d = (hrp.Position - r.Position).Magnitude
+                if d < bestDist then bestDist = d; best = {model=m, root=r} end
+            end
+        end
+    end
+    return best
+end
+
+local function attackEnemy(enemy)
+    if not getChar() then return end
+    tpTo(enemy.root.Position + Vector3.new(0, 3, 0))
+    for _, v in ipairs(enemy.model:GetDescendants()) do
+        if v:IsA("ClickDetector") then fireclickdetector(v) end
+    end
+    local rem = RS:FindFirstChild("Remotes") and RS.Remotes:FindFirstChild("ExecuteSkill")
+    if rem then rem:FireServer(enemy.root, enemy.root.Position) end
+end
+
+local function doQuest()
+    for _, npc in ipairs(workspace:GetDescendants()) do
+        if npc:IsA("Model") then
+            for _, qn in ipairs(SEA1_QUESTS) do
+                if npc.Name:find(qn, 1, true) then
+                    local r = npc:FindFirstChildWhichIsA("BasePart")
+                    if r then
+                        tpTo(r.Position + Vector3.new(2, 0, 2))
+                        local qr = RS:FindFirstChild("Remotes") and RS.Remotes:FindFirstChild("SelectQuest")
+                        if qr then qr:FireServer(npc, true) end
+                        task.wait(0.5)
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function collectDrops()
+    if not getChar() then return end
+    for _, item in ipairs(workspace:GetDescendants()) do
+        if item:IsA("BasePart") then
+            local n = item.Name:lower()
+            if n:find("fruit") or n:find("beli") or n:find("money") or n:find("drop") then
+                if (hrp.Position - item.Position).Magnitude < 60 then
+                    tpTo(item.Position); task.wait(0.05)
+                end
+            end
+        end
+    end
+end
+
+-- ── FARM LOOP ─────────────────────────────────────────────────────────────────
+local function farmLoop()
+    while CFG.FarmEnabled do
+        task.wait(CFG.LoopDelay)
+        if not inSea1() then CFG.FarmEnabled = false break end
+        if not getChar() then task.wait(2) continue end
+        if not safeHP()  then task.wait(1) continue end
+        if CFG.AutoQuest   then doQuest() end
+        local e = nearestEnemy()
+        if e then attackEnemy(e) end
+        if CFG.AutoCollect then collectDrops() end
+    end
+end
+
+lp.CharacterAdded:Connect(function(c)
+    char = c
+    hrp  = c:WaitForChild("HumanoidRootPart")
+    hum  = c:WaitForChild("Humanoid")
+    task.wait(1); applyStats()
+end)
+applyStats()
+
+-- ── FLUENT WINDOW ─────────────────────────────────────────────────────────────
+local Window = Fluent:CreateWindow({
+    Title          = "larp farm",
+    SubTitle       = "sea 1 — built by odil9",
+    TabWidth       = 160,
+    Size           = UDim2.fromOffset(560, 400),
+    Acrylic        = true,
+    Theme          = "Dark",
+    MinimizeKeybind = Enum.KeyCode.RightControl,
+})
+
+-- ── TABS ──────────────────────────────────────────────────────────────────────
+local Tabs = {
+    Farm    = Window:AddTab({ Title = "Farm",    Icon = "sword" }),
+    Player  = Window:AddTab({ Title = "Player",  Icon = "user" }),
+    Config  = Window:AddTab({ Title = "Config",  Icon = "settings" }),
+}
+
+-- ── FARM TAB ──────────────────────────────────────────────────────────────────
+Tabs.Farm:AddParagraph({
+    Title   = "Sea 1 Auto-Farm",
+    Content = "Targets Sea 1 enemies only (cap lv "..CFG.Sea1MaxLevel.."). Halts if you exceed the cap.",
+})
+
+Tabs.Farm:AddToggle("FarmToggle", {
+    Title   = "Enable Farm",
+    Default = false,
+    Callback = function(v)
+        CFG.FarmEnabled = v
+        if v then task.spawn(farmLoop) end
+    end,
+})
+
+Tabs.Farm:AddToggle("QuestToggle", {
+    Title   = "Auto Quest",
+    Default = CFG.AutoQuest,
+    Callback = function(v) CFG.AutoQuest = v end,
+})
+
+Tabs.Farm:AddToggle("CollectToggle", {
+    Title   = "Auto Collect Drops",
+    Default = CFG.AutoCollect,
+    Callback = function(v) CFG.AutoCollect = v end,
+})
+
+Tabs.Farm:AddSlider("SafeHPSlider", {
+    Title   = "Safe HP %",
+    Min     = 5,
+    Max     = 75,
+    Default = CFG.SafeHP * 100,
+    Rounding = 0,
+    Callback = function(v) CFG.SafeHP = v / 100 end,
+})
+
+Tabs.Farm:AddSlider("LevelCapSlider", {
+    Title   = "Sea 1 Level Cap",
+    Min     = 100,
+    Max     = 700,
+    Default = CFG.Sea1MaxLevel,
+    Rounding = 0,
+    Callback = function(v) CFG.Sea1MaxLevel = v end,
+})
+
+-- ── PLAYER TAB ────────────────────────────────────────────────────────────────
+Tabs.Player:AddSlider("WalkSpeedSlider", {
+    Title   = "Walk Speed",
+    Min     = 16,
+    Max     = 250,
+    Default = CFG.WalkSpeed,
+    Rounding = 0,
+    Callback = function(v)
+        CFG.WalkSpeed = v
+        if getChar() then hum.WalkSpeed = v end
+    end,
+})
+
+Tabs.Player:AddSlider("JumpSlider", {
+    Title   = "Jump Power",
+    Min     = 50,
+    Max     = 300,
+    Default = CFG.JumpPower,
+    Rounding = 0,
+    Callback = function(v)
+        CFG.JumpPower = v
+        if getChar() then hum.JumpPower = v end
+    end,
+})
+
+Tabs.Player:AddButton({
+    Title   = "Reset Stats",
+    Description = "Walk 50 / Jump 80",
+    Callback = function()
+        CFG.WalkSpeed = 50; CFG.JumpPower = 80
+        applyStats()
+        Fluent:Notify({ Title="larp", Content="stats reset", Duration=2 })
+    end,
+})
+
+-- ── CONFIG TAB ────────────────────────────────────────────────────────────────
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+SaveManager:SetFolder("larpFarm")
+SaveManager:BuildConfigSection(Tabs.Config)
+InterfaceManager:BuildInterfaceSection(Tabs.Config)
+
+-- ── NOTIFY READY ─────────────────────────────────────────────────────────────
+Window:SelectTab(1)
+Fluent:Notify({
+    Title    = "larp farm loaded",
+    Content  = "sea 1 ready — RCtrl to hide",
+    Duration = 4,
+})
